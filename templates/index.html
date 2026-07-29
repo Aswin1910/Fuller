@@ -179,30 +179,6 @@ endblock %} {% block content %}
         <select id="channelASelect"></select>
       </div>
     </div>
-
-    <section id="graphCardA" class="panel" hidden>
-      <div class="panel__head">
-        <svg
-          class="panel__icon panel__icon--a"
-          viewBox="0 0 24 24"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M4 18l4.5-6 3.5 4 4-7 4 5"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-        <h2>Trace A</h2>
-        <span class="panel__hint">03 · PLOT</span>
-      </div>
-      <div class="panel__body">
-        <div id="graphA" class="graph graph--pair"></div>
-      </div>
-    </section>
   </div>
 
   <div class="channel-col channel-col--b">
@@ -229,30 +205,60 @@ endblock %} {% block content %}
         <select id="channelBSelect"></select>
       </div>
     </div>
+  </div>
+</section>
 
-    <section id="graphCardB" class="panel" hidden>
-      <div class="panel__head">
-        <svg
-          class="panel__icon panel__icon--b"
-          viewBox="0 0 24 24"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M4 18l4.5-6 3.5 4 4-7 4 5"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-        <h2>Trace B</h2>
-        <span class="panel__hint">03 · PLOT</span>
-      </div>
-      <div class="panel__body">
-        <div id="graphB" class="graph graph--pair"></div>
-      </div>
-    </section>
+<!-- Combined trace -->
+
+<section id="graphCard" class="panel" hidden>
+  <div class="panel__head">
+    <svg class="panel__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 18l4.5-6 3.5 4 4-7 4 5"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+    <h2>Trace</h2>
+    <button
+      type="button"
+      id="toggleSelectMode"
+      class="btn btn--select"
+      title="Drag across the graph to mark a time window as a selection"
+    >
+      Select ranges
+    </button>
+    <span class="panel__hint">03 · PLOT · A VS B</span>
+  </div>
+  <div class="panel__body">
+    <div id="graph" class="graph"></div>
+  </div>
+</section>
+
+<!-- Peak / range selections -->
+
+<section id="selectionsCard" class="panel" hidden>
+  <div class="panel__head">
+    <svg class="panel__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 12h4l2-7 4 14 2-7h4"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+    <h2>Selections</h2>
+    <button type="button" id="clearSelections" class="btn btn--ghost">
+      Clear all
+    </button>
+  </div>
+
+  <div class="panel__body">
+    <div id="selectionChips" class="selection-chips"></div>
+    <div id="selectionResults"></div>
   </div>
 </section>
 

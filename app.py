@@ -21,7 +21,9 @@ app.secret_key = os.environ.get("SECRET_KEY", "excel-analyzer-secret")
 
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
 
-UPLOAD_FOLDER = "uploads"
+UPLOAD_FOLDER = os.path.join(os.getcwd(), "uploads")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 ALLOWED_EXTENSIONS = {"xlsx", "xls", "csv"}
 MAX_CONTENT_LENGTH = 25 * 1024 * 1024  # 25 MB per request
 
@@ -358,6 +360,102 @@ def graph():
         "series": series,
         "statistics": statistics_out,
         "comparison": comparison
+    })
+
+
+@app.route("/range_statistics", methods=["POST"])
+def range_statistics():
+
+    if "cache_file" not in session:
+        return jsonify({
+            "success": False,
+            "message": "Please upload files first."
+        })
+
+    try:
+        df = load_dataframe(session["cache_file"])
+    except FileNotFoundError:
+        return jsonify({
+            "success": False,
+            "message": "Cached data not found."
+        })
+
+    payload = request.get_json(silent=True) or {}
+
+    ranges = payload.get("ranges") or []
+
+    if not ranges:
+        return jsonify({
+            "success": False,
+            "message": "No selections to analyze."
+        })
+
+    column_a = payload.get("column_a") or None
+    column_b = payload.get("column_b") or None
+
+    requested = [
+        (side, column) for side, column in (("a", column_a), ("b", column_b))
+        if column and column in df.columns
+    ]
+
+    if not requested:
+        return jsonify({
+            "success": False,
+            "message": "No valid columns selected."
+        })
+
+    def stats_from_numeric(numeric):
+        return {
+            "count": int(numeric.count()),
+            "missing": int(numeric.isna().sum()),
+            "mean": safe_float(numeric.mean()),
+            "median": safe_float(numeric.median()),
+            "std": safe_float(numeric.std()),
+            "min": safe_float(numeric.min()),
+            "max": safe_float(numeric.max())
+        }
+
+    results = {}
+
+    for side, column in requested:
+
+        per_range = []
+        # Slices are collected (not stacked) so the cumulative view below
+        # can drop rows that fall in more than one selection, rather than
+        # counting an overlapping timestamp twice.
+        slices = []
+
+        for r in ranges:
+
+            start = r.get("start")
+            end = r.get("end")
+
+            sliced = filter_dataframe(df, start, end)
+
+            slices.append(sliced[["Time", column]])
+
+            numeric = pd.to_numeric(sliced[column], errors="coerce")
+
+            per_range.append({
+                "start": start,
+                "end": end,
+                **stats_from_numeric(numeric)
+            })
+
+        combined = pd.concat(slices, ignore_index=True)
+        combined = combined.drop_duplicates(subset="Time")
+
+        cumulative_numeric = pd.to_numeric(combined[column], errors="coerce")
+
+        results[side] = {
+            "column": column,
+            "per_range": per_range,
+            "cumulative": stats_from_numeric(cumulative_numeric)
+        }
+
+    return jsonify({
+        "success": True,
+        "results": results
     })
 
 

@@ -1,5 +1,26 @@
 let dataTable = null;
 
+// -------------------------------
+// Range selections (peak picking)
+// -------------------------------
+
+let selections = [];
+let nextSelectionId = 1;
+let selectModeOn = false;
+
+const SELECTION_COLORS = [
+    "#9B7EDE", // violet
+    "#E5484D", // red
+    "#4FD6C4", // cyan
+    "#F5A623", // amber
+    "#6E9BF5", // blue
+    "#D6A2E8"  // light purple
+];
+
+function selectionColor(index){
+    return SELECTION_COLORS[index % SELECTION_COLORS.length];
+}
+
 const els = {
     loading: () => document.getElementById("loading"),
     dropzone: () => document.getElementById("dropzone"),
@@ -322,17 +343,33 @@ const AXIS_STYLE = {
     autorange: true,
     gridcolor: "#232C36",
     zerolinecolor: "#232C36",
-    linecolor: "#232C36"
+    linecolor: "#232C36",
+    showticklabels: true
 };
 
-function plotlyLayout(color){
+function plotlyLayout(){
     return {
         paper_bgcolor: "transparent",
         plot_bgcolor: "transparent",
         font: { family: "IBM Plex Mono, monospace", color: "#8494A3", size: 11 },
         margin: { t: 10, r: 20, b: 40, l: 55 },
-        xaxis: { ...AXIS_STYLE, type: "date" },
-        yaxis: AXIS_STYLE,
+        xaxis: {
+            ...AXIS_STYLE,
+            type: "date",
+            tickformat: "%d-%b",
+            tickmode: "linear",
+            dtick: 24 * 60 * 60 * 1000, // one label every day
+            tickangle: -45
+        },
+        yaxis: {
+            ...AXIS_STYLE,
+            // "auto" lets Plotly pick a sensible number of evenly spaced
+            // labels for whatever range the data actually spans, instead
+            // of a fixed 1-unit step that produces hundreds of cramped
+            // labels once values run into the hundreds/thousands.
+            tickmode: "auto",
+            nticks: 8
+        },
         // Drag pans the view. Scroll wheel still zooms (scrollZoom below).
         // Box-select zoom + scrollZoom together on a date axis is what was
         // causing zoom to snap the range down toward the Unix epoch
@@ -349,8 +386,7 @@ async function loadGraph(){
     const columnB = selectorB ? selectorB.getValue() : "";
 
     if (!columnA && !columnB) {
-        hide("graphCardA");
-        hide("graphCardB");
+        hide("graphCard");
         hide("selectedStatsCard");
         return;
     }
@@ -371,8 +407,7 @@ async function loadGraph(){
     const result = await response.json();
 
     if (!result.success) {
-        hide("graphCardA");
-        hide("graphCardB");
+        hide("graphCard");
         hide("selectedStatsCard");
         return;
     }
@@ -380,35 +415,296 @@ async function loadGraph(){
     const seriesA = result.series.find(s => s.side === "a");
     const seriesB = result.series.find(s => s.side === "b");
 
-    plotSingleTrace("graphCardA", "graphA", seriesA, result.time, CHANNEL_A_COLOR);
-    plotSingleTrace("graphCardB", "graphB", seriesB, result.time, CHANNEL_B_COLOR);
+    plotCombinedTrace(seriesA, seriesB, result.time);
 
     renderChannelStats(result.statistics, result.comparison);
 
 }
 
-function plotSingleTrace(cardId, graphId, series, time, color){
+function plotCombinedTrace(seriesA, seriesB, time){
 
-    if (!series) {
-        hide(cardId);
+    if (!seriesA && !seriesB) {
+        hide("graphCard");
         return;
     }
 
-    show(cardId);
+    show("graphCard");
 
-    Plotly.newPlot(graphId, [{
-        x: time,
-        y: series.values,
-        mode: "lines",
-        type: "scatter",
-        name: series.name,
-        line: { color: color, width: 1.6 }
-    }], plotlyLayout(color), {
+    const traces = [];
+
+    if (seriesA) {
+        traces.push({
+            x: time,
+            y: seriesA.values,
+            mode: "lines",
+            type: "scatter",
+            name: `A · ${seriesA.name}`,
+            line: { color: CHANNEL_A_COLOR, width: 1.6 }
+        });
+    }
+
+    if (seriesB) {
+        traces.push({
+            x: time,
+            y: seriesB.values,
+            mode: "lines",
+            type: "scatter",
+            name: `B · ${seriesB.name}`,
+            line: { color: CHANNEL_B_COLOR, width: 1.6 }
+        });
+    }
+
+    const layout = plotlyLayout();
+    layout.showlegend = true;
+    layout.legend = {
+        orientation: "h",
+        x: 0,
+        y: 1.08,
+        font: { color: "#8494A3", size: 11 }
+    };
+    layout.margin = { t: 40, r: 20, b: 45, l: 60 };
+
+    layout.dragmode = selectModeOn ? "select" : "pan";
+    layout.selectdirection = "h";
+    layout.shapes = selectionShapes();
+
+    Plotly.newPlot("graph", traces, layout, {
         responsive: true,
         scrollZoom: true,
         displaylogo: false
+    }).then(() => {
+        // The panel goes from hidden -> visible in the same tick this
+        // runs, so Plotly can measure the container before the browser
+        // has finished laying it out at full size. That stale/zero-ish
+        // initial measurement is what caused most tick labels to never
+        // render (only the first couple, drawn before the mismatch
+        // mattered). Forcing a resize on the next frame, once layout has
+        // definitely settled, fixes it.
+        requestAnimationFrame(() => {
+            Plotly.Plots.resize("graph");
+        });
+
+        // Plotly.newPlot rebuilds the plot's internal event registry each
+        // time, so any prior listener from an earlier render is gone --
+        // this has to be re-attached after every render, not just once.
+        const graphDiv = document.getElementById("graph");
+        graphDiv.removeAllListeners && graphDiv.removeAllListeners("plotly_selected");
+        graphDiv.on("plotly_selected", handleGraphSelection);
     });
 
+}
+
+// -------------------------------
+// Selection mode toggle
+// -------------------------------
+
+const selectModeBtn = document.getElementById("toggleSelectMode");
+
+selectModeBtn.addEventListener("click", () => {
+    selectModeOn = !selectModeOn;
+    selectModeBtn.classList.toggle("is-active", selectModeOn);
+    selectModeBtn.textContent = selectModeOn ? "Selecting…" : "Select ranges";
+
+    const graphDiv = document.getElementById("graph");
+    if (graphDiv && graphDiv.data) {
+        Plotly.relayout("graph", {
+            dragmode: selectModeOn ? "select" : "pan"
+        });
+    }
+});
+
+document.getElementById("clearSelections").addEventListener("click", () => {
+    selections = [];
+    refreshSelections();
+});
+
+function handleGraphSelection(eventData){
+
+    if (!selectModeOn || !eventData || !eventData.range || !eventData.range.x) {
+        return;
+    }
+
+    const [x0, x1] = eventData.range.x;
+
+    selections.push({
+        id: nextSelectionId++,
+        start: toIsoLocal(x0),
+        end: toIsoLocal(x1)
+    });
+
+    refreshSelections();
+}
+
+function toIsoLocal(value){
+
+    if (value instanceof Date) {
+        // Build the string from local getters (no UTC conversion), in
+        // case a future Plotly version ever hands back a Date object
+        // instead of a string for a date-type axis.
+        const pad = n => String(n).padStart(2, "0");
+        return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}` +
+               `T${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+    }
+
+    // Plotly hands back date-axis selection bounds as plain timestamp
+    // strings with no timezone attached (e.g. "2026-07-18 07:10:07") --
+    // these are just the raw Time values, not UTC. Round-tripping them
+    // through `new Date(...).toISOString()` would reinterpret them in
+    // the browser's local timezone and then convert to UTC, silently
+    // shifting every boundary (e.g. -5:30 for IST). Just normalize the
+    // separator/precision instead of touching the actual time.
+    return String(value).replace(" ", "T").slice(0, 19);
+}
+
+function selectionShapes(){
+    return selections.map((s, i) => ({
+        type: "rect",
+        xref: "x",
+        yref: "paper",
+        x0: s.start,
+        x1: s.end,
+        y0: 0,
+        y1: 1,
+        fillcolor: selectionColor(i),
+        opacity: 0.14,
+        line: { color: selectionColor(i), width: 1 }
+    }));
+}
+
+function refreshSelections(){
+
+    const graphDiv = document.getElementById("graph");
+    if (graphDiv && graphDiv.data) {
+        Plotly.relayout("graph", { shapes: selectionShapes() });
+    }
+
+    renderSelectionChips();
+
+    if (selections.length === 0) {
+        hide("selectionsCard");
+        document.getElementById("selectionResults").innerHTML = "";
+        return;
+    }
+
+    show("selectionsCard");
+    loadRangeStatistics();
+}
+
+function renderSelectionChips(){
+
+    const container = document.getElementById("selectionChips");
+
+    container.innerHTML = selections.map((s, i) => `
+        <span class="chip" style="--chip-color:${selectionColor(i)}">
+            <span class="chip__swatch"></span>
+            S${i + 1} · ${s.start.replace("T", " ")} → ${s.end.replace("T", " ")}
+            <button type="button" class="chip__remove" data-id="${s.id}" aria-label="Remove selection">×</button>
+        </span>
+    `).join("");
+
+    container.querySelectorAll(".chip__remove").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const id = Number(btn.dataset.id);
+            selections = selections.filter(s => s.id !== id);
+            refreshSelections();
+        });
+    });
+}
+
+// -------------------------------
+// Per-selection + cumulative statistics
+// -------------------------------
+
+async function loadRangeStatistics(){
+
+    const columnA = selectorA ? selectorA.getValue() : "";
+    const columnB = selectorB ? selectorB.getValue() : "";
+
+    if (!columnA && !columnB) {
+        document.getElementById("selectionResults").innerHTML =
+            '<p class="empty-note">Pick Channel A and/or B above to see stats for these selections.</p>';
+        return;
+    }
+
+    const response = await fetch("/range_statistics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            ranges: selections.map(s => ({ start: s.start, end: s.end })),
+            column_a: columnA || null,
+            column_b: columnB || null
+        })
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+        document.getElementById("selectionResults").innerHTML =
+            `<p class="empty-note">${result.message}</p>`;
+        return;
+    }
+
+    renderRangeStatistics(result.results);
+}
+
+function statRow(label, s){
+    if (!s) return "";
+    return `
+        <tr>
+            <td>${label}</td>
+            <td class="tabular">${s.count}</td>
+            <td class="tabular">${s.missing}</td>
+            <td class="tabular">${fmt(s.mean)}</td>
+            <td class="tabular">${fmt(s.median)}</td>
+            <td class="tabular">${fmt(s.std)}</td>
+            <td class="tabular">${fmt(s.min)}</td>
+            <td class="tabular">${fmt(s.max)}</td>
+        </tr>
+    `;
+}
+
+function fmt(v){
+    return (v === null || v === undefined) ? "—" : v.toFixed(4);
+}
+
+function renderRangeStatistics(results){
+
+    const sides = [["a", "A"], ["b", "B"]];
+
+    const blocks = sides.map(([key, label]) => {
+
+        const side = results[key];
+        if (!side) return "";
+
+        const rangeRows = side.per_range.map((r, i) =>
+            statRow(`S${i + 1} · ${side.column}`, r)
+        ).join("");
+
+        const cumulativeRow = statRow(`Cumulative · ${side.column}`, side.cumulative);
+
+        return `
+            <table class="selection-stats-table">
+                <thead>
+                    <tr>
+                        <th>Channel ${label} — Selection</th>
+                        <th>Count</th>
+                        <th>Missing</th>
+                        <th>Mean</th>
+                        <th>Median</th>
+                        <th>Std Dev</th>
+                        <th>Min</th>
+                        <th>Max</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rangeRows}
+                    <tr class="selection-stats-table__cumulative">${cumulativeRow.replace("<tr>", "").replace("</tr>", "")}</tr>
+                </tbody>
+            </table>
+        `;
+    }).join("");
+
+    document.getElementById("selectionResults").innerHTML = blocks;
 }
 
 function formatDiff(value){
