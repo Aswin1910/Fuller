@@ -17,11 +17,8 @@ from utils.helpers import (
 )
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "excel-analyzer-secret")
 
-# Secret key comes from the environment in production. A random key is
-# generated as a local-dev fallback so the app still runs out of the box,
-# but that means sessions won't survive a restart -- set SECRET_KEY
-# explicitly (e.g. in your environment or a .env file) for real deployments.
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
 
 UPLOAD_FOLDER = "uploads"
