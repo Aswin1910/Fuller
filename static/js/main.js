@@ -489,7 +489,9 @@ function plotCombinedTrace(seriesA, seriesB, time){
         // this has to be re-attached after every render, not just once.
         const graphDiv = document.getElementById("graph");
         graphDiv.removeAllListeners && graphDiv.removeAllListeners("plotly_selected");
+        graphDiv.removeAllListeners && graphDiv.removeAllListeners("plotly_relayout");
         graphDiv.on("plotly_selected", handleGraphSelection);
+        graphDiv.on("plotly_relayout", handleShapeEdit);
     });
 
 }
@@ -535,6 +537,57 @@ function handleGraphSelection(eventData){
     refreshSelections();
 }
 
+function handleShapeEdit(eventData){
+
+    if (!eventData) return;
+
+    // Plotly reports an edited shape as flat keys like "shapes[2].x0" on
+    // the relayout event -- this also fires for ordinary pan/zoom
+    // (with keys like "xaxis.range[0]"), so only react when a shape
+    // actually moved.
+    const touchedIndexes = new Set();
+
+    Object.keys(eventData).forEach(key => {
+        const match = key.match(/^shapes\[(\d+)\]\.(x0|x1)$/);
+        if (match) touchedIndexes.add(Number(match[1]));
+    });
+
+    if (touchedIndexes.size === 0) return;
+
+    const graphDiv = document.getElementById("graph");
+    const currentShapes = (graphDiv.layout && graphDiv.layout.shapes) || [];
+
+    let changed = false;
+
+    touchedIndexes.forEach(i => {
+
+        const shape = currentShapes[i];
+        const selection = selections[i];
+
+        if (!shape || !selection) return;
+
+        let start = toIsoLocal(shape.x0);
+        let end = toIsoLocal(shape.x1);
+
+        // If the left edge got dragged past the right edge (or vice
+        // versa), keep start/end in the right order rather than saving
+        // an inverted range.
+        if (start > end) {
+            [start, end] = [end, start];
+        }
+
+        selection.start = start;
+        selection.end = end;
+        changed = true;
+
+    });
+
+    if (!changed) return;
+
+    renderSelectionChips();
+    loadRangeStatistics();
+}
+
 function toIsoLocal(value){
 
     if (value instanceof Date) {
@@ -567,7 +620,11 @@ function selectionShapes(){
         y1: 1,
         fillcolor: selectionColor(i),
         opacity: 0.14,
-        line: { color: selectionColor(i), width: 1 }
+        line: { color: selectionColor(i), width: 1 },
+        // Lets the user click the rectangle and drag its edges directly
+        // on the chart to extend/shrink it, instead of only being able
+        // to delete and re-draw a whole new selection.
+        editable: true
     }));
 }
 

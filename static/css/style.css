@@ -821,6 +821,13 @@ table.dataTable tbody tr:nth-child(even):hover td{
   margin-bottom:18px;
 }
 
+.selection-hint{
+  margin:-8px 0 18px;
+  color:var(--text-faint);
+  font-family:var(--font-mono);
+  font-size:14px;
+}
+
 .chip{
   display:inline-flex;
   align-items:center;
