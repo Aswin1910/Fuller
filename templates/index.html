@@ -1,0 +1,301 @@
+{% extends "base.html" %} {% block title %} Fuller — Time Series Console {%
+endblock %} {% block content %}
+
+<section class="page-intro">
+  <h1>Time series console</h1>
+  <p>
+    Load Excel or CSV exports from one or more plants, isolate a time window,
+    and read the signal — as a table, a statistics readout, or a plotted trace.
+  </p>
+</section>
+
+<!-- Upload -->
+
+<section class="panel panel--accent" id="uploadPanel">
+  <div class="panel__head">
+    <svg class="panel__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 3v12M12 3l-4 4M12 3l4 4"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+    <h2>Load data</h2>
+    <span class="panel__hint">.xlsx · .xls · .csv</span>
+  </div>
+
+  <div class="panel__body">
+    <form id="uploadForm" enctype="multipart/form-data">
+      <label class="dropzone" id="dropzone" for="files">
+        <input
+          id="files"
+          type="file"
+          name="files"
+          accept=".xlsx,.xls,.csv"
+          multiple
+          hidden
+        />
+        <span class="dropzone__icon" aria-hidden="true">＋</span>
+        <span class="dropzone__title">Drop files, or click to browse</span>
+        <span class="dropzone__meta" id="dropzoneMeta"
+          >Each file needs a <code>Time</code> column · merges &amp; sorts
+          automatically</span
+        >
+      </label>
+
+      <div class="panel__actions">
+        <button class="btn btn--primary" type="submit">Read files</button>
+        <span id="loading" class="loading-tag" hidden>
+          <span class="loading-tag__spinner" aria-hidden="true"></span>
+          Parsing…
+        </span>
+      </div>
+    </form>
+  </div>
+</section>
+
+<!-- Readouts -->
+
+<section class="readout-grid">
+  <div class="readout">
+    <span class="readout__label">Rows</span>
+    <span class="readout__value" id="rowCount">—</span>
+  </div>
+  <div class="readout">
+    <span class="readout__label">Columns</span>
+    <span class="readout__value" id="columnCount">—</span>
+  </div>
+  <div class="readout">
+    <span class="readout__label">Start</span>
+    <span class="readout__value readout__value--small" id="startDisplay"
+      >—</span
+    >
+  </div>
+  <div class="readout">
+    <span class="readout__label">End</span>
+    <span class="readout__value readout__value--small" id="endDisplay">—</span>
+  </div>
+</section>
+
+<!-- Time Filter -->
+
+<section id="filterCard" class="panel" hidden>
+  <div class="panel__head">
+    <svg class="panel__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle
+        cx="12"
+        cy="12"
+        r="8.5"
+        stroke="currentColor"
+        stroke-width="1.6"
+      />
+      <path
+        d="M12 7.5V12l3 2"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+    <h2>Time window</h2>
+    <span class="panel__hint">02 · FILTER</span>
+  </div>
+
+  <div class="panel__body">
+    <form id="filterForm" class="filter-form">
+      <div class="field">
+        <label for="start">Start</label>
+        <input type="datetime-local" id="start" name="start" step="1" />
+      </div>
+
+      <div class="field">
+        <label for="end">End</label>
+        <input type="datetime-local" id="end" name="end" step="1" />
+      </div>
+
+      <button class="btn btn--success" type="submit">Apply window</button>
+    </form>
+  </div>
+</section>
+
+<!-- Data -->
+
+<section id="tableCard" class="panel" hidden>
+  <div class="panel__head">
+    <svg class="panel__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect
+        x="3.5"
+        y="4.5"
+        width="17"
+        height="15"
+        rx="1"
+        stroke="currentColor"
+        stroke-width="1.6"
+      />
+      <path d="M3.5 9.5h17M9 4.5v15" stroke="currentColor" stroke-width="1.6" />
+    </svg>
+    <h2>Dataset</h2>
+    <span class="panel__hint">FILTERED ROWS</span>
+  </div>
+
+  <div class="panel__body panel__body--scroll">
+    <div id="tableArea"></div>
+  </div>
+</section>
+
+<!-- Channel A / Channel B -->
+
+<section class="channel-pair">
+  <div class="channel-col channel-col--a">
+    <div class="panel panel--select">
+      <div class="panel__head">
+        <svg
+          class="panel__icon panel__icon--a"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M4 6h16M4 12h16M4 18h9"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          />
+          <circle cx="15" cy="6" r="1.6" fill="currentColor" />
+        </svg>
+        <h2>Channel A</h2>
+        <span class="panel__hint">ONE PLANT</span>
+      </div>
+      <div class="panel__body">
+        <select id="channelASelect"></select>
+      </div>
+    </div>
+
+    <section id="graphCardA" class="panel" hidden>
+      <div class="panel__head">
+        <svg
+          class="panel__icon panel__icon--a"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M4 18l4.5-6 3.5 4 4-7 4 5"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <h2>Trace A</h2>
+        <span class="panel__hint">03 · PLOT</span>
+      </div>
+      <div class="panel__body">
+        <div id="graphA" class="graph graph--pair"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="channel-col channel-col--b">
+    <div class="panel panel--select">
+      <div class="panel__head">
+        <svg
+          class="panel__icon panel__icon--b"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M4 6h16M4 12h16M4 18h9"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          />
+          <circle cx="8" cy="12" r="1.6" fill="currentColor" />
+        </svg>
+        <h2>Channel B</h2>
+        <span class="panel__hint">ONE PLANT</span>
+      </div>
+      <div class="panel__body">
+        <select id="channelBSelect"></select>
+      </div>
+    </div>
+
+    <section id="graphCardB" class="panel" hidden>
+      <div class="panel__head">
+        <svg
+          class="panel__icon panel__icon--b"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M4 18l4.5-6 3.5 4 4-7 4 5"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <h2>Trace B</h2>
+        <span class="panel__hint">03 · PLOT</span>
+      </div>
+      <div class="panel__body">
+        <div id="graphB" class="graph graph--pair"></div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- Selected channel stats (shared) -->
+
+<section id="selectedStatsCard" class="panel" hidden>
+  <div class="panel__head">
+    <svg class="panel__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 19V10M12 19V5M19 19v-7"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+      />
+    </svg>
+    <h2>Channel readout</h2>
+    <span class="panel__hint">A VS B</span>
+  </div>
+
+  <div class="panel__body">
+    <div id="selectedStatsArea"></div>
+  </div>
+</section>
+
+<!-- Full statistics -->
+
+<section id="statsCard" class="panel" hidden>
+  <div class="panel__head">
+    <svg class="panel__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 19V13M12 19V6M19 19v-9"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+      />
+    </svg>
+    <h2>Statistics</h2>
+    <span class="panel__hint">ALL NUMERIC COLUMNS</span>
+  </div>
+
+  <div class="panel__body">
+    <div id="statsArea"></div>
+  </div>
+</section>
+
+{% endblock %}

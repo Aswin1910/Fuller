@@ -1,0 +1,22 @@
+# User-uploaded and generated data — never commit real data files
+uploads/*
+!uploads/.gitkeep
+
+cache/*
+!cache/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>{% block title %} Fuller — Time Series Console {% endblock %}</title>
+
+    <!-- Type -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Tom Select (column picker) -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/tom-select/dist/css/tom-select.css"
+      rel="stylesheet"
+    />
+
+    <!-- DataTables (core, unstyled — themed in style.css) -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.datatables.net/2.0.8/css/dataTables.dataTables.css"
+    />
+
+    <!-- Console CSS -->
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+
+    {% block head %} {% endblock %}
+  </head>
+
+  <body>
+    <header class="console-bar">
+      <a class="console-brand" href="/">
+        <span class="console-brand__mark" aria-hidden="true">F</span>
+        <h1 class="console-brand__word">FULLER</h1>
+        <span class="console-brand__tag">TIME SERIES CONSOLE</span>
+      </a>
+
+      <div class="console-status" id="consoleStatus">
+        <span
+          class="console-status__dot"
+          id="statusDot"
+          aria-hidden="true"
+        ></span>
+        <span id="statusText">NO DATA LOADED</span>
+      </div>
+    </header>
+
+    <div class="graticule" role="presentation"></div>
+
+    <main class="console-main">{% block content %} {% endblock %}</main>
+
+    <div class="graticule" role="presentation"></div>
+
+    <footer class="console-footer">
+      <span>FULLER · EXCEL &amp; CSV TIME SERIES ANALYSIS</span>
+      <span>BUILD 2026.08</span>
+    </footer>
+
+    <!-- jQuery (required by DataTables) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+    <!-- DataTables -->
+    <script src="https://cdn.datatables.net/2.0.8/js/dataTables.js"></script>
+
+    <!-- Tom Select -->
+    <script src="https://cdn.jsdelivr.net/npm/tom-select/dist/js/tom-select.complete.min.js"></script>
+
+    <!-- Plotly -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+    <!-- Console JavaScript -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+
+    {% block scripts %} {% endblock %}
+  </body>
+</html>
