@@ -11,10 +11,18 @@ let selectModeOn = false;
 const SELECTION_COLORS = [
     "#9B7EDE", // violet
     "#E5484D", // red
-    "#4FD6C4", // cyan
-    "#F5A623", // amber
     "#6E9BF5", // blue
-    "#D6A2E8"  // light purple
+    "#D6A2E8", // light purple
+    "#6FCF97", // green
+    "#F5D76E", // yellow
+    "#F783AC", // pink
+    "#4DABF7", // sky blue
+    "#FF8A65", // coral
+    "#A9E34B"  // lime
+    // Deliberately excludes amber (#F5A623) and cyan (#4FD6C4) -- those
+    // are Channel A's and Channel B's own trace colors, so a selection
+    // using either one would visually blend into the line instead of
+    // reading as its own distinct highlight.
 ];
 
 function selectionColor(index){
@@ -468,6 +476,23 @@ function plotCombinedTrace(seriesA, seriesB, time){
     layout.selectdirection = "h";
     layout.shapes = selectionShapes();
 
+    // Plotly applies this style to whichever shape is actively being
+    // dragged/resized, regardless of that shape's own fillcolor -- its
+    // default is a hardcoded magenta (rgb(255,0,255), opacity 0.5),
+    // which is why the box visibly changed color the moment you started
+    // extending it. Matching it to the theme keeps the highlight subtle
+    // and consistent instead of jarring.
+    // Plotly applies this style to whichever shape is actively being
+    // dragged/resized, regardless of that shape's own fillcolor. Amber
+    // is also Channel A's own trace color, so using it here made the
+    // line disappear into the highlight while editing -- a neutral
+    // white reads as a clear "active" indicator against either channel
+    // color without competing with them.
+    layout.activeshape = {
+        fillcolor: "#FFFFFF",
+        opacity: 0.16
+    };
+
     Plotly.newPlot("graph", traces, layout, {
         responsive: true,
         scrollZoom: true,
@@ -520,6 +545,9 @@ document.getElementById("clearSelections").addEventListener("click", () => {
     refreshSelections();
 });
 
+let pendingSelection = null;
+let selectionDebounceTimer = null;
+
 function handleGraphSelection(eventData){
 
     if (!selectModeOn || !eventData || !eventData.range || !eventData.range.x) {
@@ -528,14 +556,34 @@ function handleGraphSelection(eventData){
 
     const [x0, x1] = eventData.range.x;
 
-    selections.push({
-        id: nextSelectionId++,
-        start: toIsoLocal(x0),
-        end: toIsoLocal(x1)
-    });
+    // Plotly fires plotly_selected repeatedly while a box-select drag is
+    // still in progress, not just once when you let go -- the same
+    // continuous-firing behavior that plotly_relayout has for shape
+    // edits. Without debouncing this, a single drag gesture was pushing
+    // dozens of near-duplicate selections (each capturing a slightly
+    // different in-progress x0/x1) into the list. Keep only the latest
+    // range from the current gesture and commit just that one, once the
+    // drag settles.
+    pendingSelection = { start: toIsoLocal(x0), end: toIsoLocal(x1) };
 
-    refreshSelections();
+    clearTimeout(selectionDebounceTimer);
+    selectionDebounceTimer = setTimeout(() => {
+
+        if (!pendingSelection) return;
+
+        selections.push({
+            id: nextSelectionId++,
+            start: pendingSelection.start,
+            end: pendingSelection.end
+        });
+
+        pendingSelection = null;
+        refreshSelections();
+
+    }, 250);
 }
+
+let shapeEditDebounceTimer = null;
 
 function handleShapeEdit(eventData){
 
@@ -576,6 +624,14 @@ function handleShapeEdit(eventData){
             [start, end] = [end, start];
         }
 
+        // Skip if this doesn't actually change anything. Without this,
+        // the shape re-sync at the bottom of this function (which
+        // itself triggers one more relayout event) would re-enter here
+        // and set changed=true again indefinitely.
+        if (start === selection.start && end === selection.end) {
+            return;
+        }
+
         selection.start = start;
         selection.end = end;
         changed = true;
@@ -584,19 +640,64 @@ function handleShapeEdit(eventData){
 
     if (!changed) return;
 
+    // The chip labels are cheap to update, so keep those live for
+    // responsive feedback while dragging. The stats recalculation is
+    // NOT cheap -- it's a network round trip that recomputes real
+    // statistics server-side -- and Plotly fires this relayout event on
+    // every intermediate mouse movement while a shape edge is being
+    // dragged, not just once when you let go. Without debouncing this,
+    // a couple of seconds of dragging fires dozens of overlapping
+    // fetch() calls, which is what was causing the page to hang.
     renderSelectionChips();
-    loadRangeStatistics();
+
+    clearTimeout(shapeEditDebounceTimer);
+    shapeEditDebounceTimer = setTimeout(() => {
+
+        loadRangeStatistics();
+
+        // Plotly's interactive shape editor doesn't reliably preserve
+        // our custom fillcolor/line color through a drag -- it can
+        // revert an edited shape to its own internal default styling
+        // once the drag completes, which is why the box appeared to
+        // change to a different color after extending it. Re-applying
+        // our full shapes array (the same selections + selectionColor
+        // mapping used everywhere else) restores the correct original
+        // color. This only runs once the drag has settled, and the
+        // no-op guard above stops it from looping.
+        const graphDiv = document.getElementById("graph");
+        if (graphDiv && graphDiv.data) {
+            try {
+                Plotly.relayout("graph", { shapes: selectionShapes() });
+            } catch (error) {
+                console.error("Failed to re-sync selection shape styling:", error);
+            }
+        }
+
+    }, 250);
+
 }
 
 function toIsoLocal(value){
 
-    if (value instanceof Date) {
-        // Build the string from local getters (no UTC conversion), in
-        // case a future Plotly version ever hands back a Date object
-        // instead of a string for a date-type axis.
+    // After you interactively drag a shape's edge, Plotly rewrites that
+    // shape's x0/x1 using its own internal numeric representation
+    // (milliseconds since epoch) rather than the string we originally
+    // supplied. The old code only handled Date objects and strings, so
+    // a number here silently fell through to the string branch and got
+    // mangled into garbage (e.g. "1752842407000" sliced as if it were
+    // a date string) -- that corrupted value would then crash the next
+    // Plotly.relayout call the moment a new selection was drawn.
+    if (value instanceof Date || typeof value === "number") {
+
+        const date = value instanceof Date ? value : new Date(value);
+
+        // Build the string from local getters (no UTC conversion) so
+        // this round-trips consistently with how the string branch
+        // below already treats the underlying Time values as
+        // timezone-less.
         const pad = n => String(n).padStart(2, "0");
-        return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}` +
-               `T${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+               `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
     }
 
     // Plotly hands back date-axis selection bounds as plain timestamp
@@ -621,6 +722,10 @@ function selectionShapes(){
         fillcolor: selectionColor(i),
         opacity: 0.14,
         line: { color: selectionColor(i), width: 1 },
+        // Draw behind the trace lines (Plotly's default is "above",
+        // which was covering the line with the highlight fill and
+        // making it hard to see, especially while editing).
+        layer: "below",
         // Lets the user click the rectangle and drag its edges directly
         // on the chart to extend/shrink it, instead of only being able
         // to delete and re-draw a whole new selection.
@@ -632,7 +737,11 @@ function refreshSelections(){
 
     const graphDiv = document.getElementById("graph");
     if (graphDiv && graphDiv.data) {
-        Plotly.relayout("graph", { shapes: selectionShapes() });
+        try {
+            Plotly.relayout("graph", { shapes: selectionShapes() });
+        } catch (error) {
+            console.error("Failed to redraw selection shapes:", error);
+        }
     }
 
     renderSelectionChips();
@@ -683,25 +792,35 @@ async function loadRangeStatistics(){
         return;
     }
 
-    const response = await fetch("/range_statistics", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            ranges: selections.map(s => ({ start: s.start, end: s.end })),
-            column_a: columnA || null,
-            column_b: columnB || null
-        })
-    });
+    try {
 
-    const result = await response.json();
+        const response = await fetch("/range_statistics", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                ranges: selections.map(s => ({ start: s.start, end: s.end })),
+                column_a: columnA || null,
+                column_b: columnB || null
+            })
+        });
 
-    if (!result.success) {
+        const result = await response.json();
+
+        if (!result.success) {
+            document.getElementById("selectionResults").innerHTML =
+                `<p class="empty-note">${result.message}</p>`;
+            return;
+        }
+
+        renderRangeStatistics(result.results);
+
+    } catch (error) {
+        // A non-JSON response (e.g. a raw 500 error page from the
+        // server) would otherwise throw here uncaught. Fail visibly
+        // but gracefully instead.
         document.getElementById("selectionResults").innerHTML =
-            `<p class="empty-note">${result.message}</p>`;
-        return;
+            '<p class="empty-note">Could not calculate statistics for these selections. Try adjusting or removing them.</p>';
     }
-
-    renderRangeStatistics(result.results);
 }
 
 function statRow(label, s){
