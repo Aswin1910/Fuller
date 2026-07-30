@@ -812,7 +812,7 @@ async function loadRangeStatistics(){
             return;
         }
 
-        renderRangeStatistics(result.results);
+        renderRangeStatistics(result.results, result.comparison);
 
     } catch (error) {
         // A non-JSON response (e.g. a raw 500 error page from the
@@ -823,7 +823,7 @@ async function loadRangeStatistics(){
     }
 }
 
-function statRow(label, s){
+function statRow(label, s, comparisonHtml){
     if (!s) return "";
     return `
         <tr>
@@ -835,6 +835,7 @@ function statRow(label, s){
             <td class="tabular">${fmt(s.std)}</td>
             <td class="tabular">${fmt(s.min)}</td>
             <td class="tabular">${fmt(s.max)}</td>
+            ${comparisonHtml === undefined ? "" : `<td class="tabular">${comparisonHtml}</td>`}
         </tr>
     `;
 }
@@ -843,20 +844,53 @@ function fmt(v){
     return (v === null || v === undefined) ? "—" : v.toFixed(4);
 }
 
-function renderRangeStatistics(results){
+// Shared by the per-selection table and the channel readout table below --
+// both show the same "diff from this row's point of view" comparison cell.
+function buildComparisonCell(entry, side){
+    if (!entry) {
+        return '<span class="cell-note">select both channels</span>';
+    }
+
+    if (entry.overlap_points === 0) {
+        return '<span class="cell-note">no overlapping timestamps</span>';
+    }
+
+    // Each row shows the diff from its own point of view:
+    // A's row = mean(A − B), B's row = mean(B − A).
+    const raw = side === "a"
+        ? entry.mean_diff
+        : (entry.mean_diff === null ? null : -entry.mean_diff);
+
+    const other = side === "a" ? "B" : "A";
+
+    return `
+        ${formatDiff(raw)}
+        <span class="cell-note">vs ${other} · avg |Δ| ${entry.mean_abs_diff.toFixed(4)} · n=${entry.overlap_points}</span>
+    `;
+}
+
+function renderRangeStatistics(results, comparison){
 
     const sides = [["a", "A"], ["b", "B"]];
+    const hasComparison = !!comparison;
 
     const blocks = sides.map(([key, label]) => {
 
         const side = results[key];
         if (!side) return "";
 
-        const rangeRows = side.per_range.map((r, i) =>
-            statRow(`S${i + 1} · ${side.column}`, r)
-        ).join("");
+        const rangeRows = side.per_range.map((r, i) => {
+            const comparisonHtml = hasComparison
+                ? buildComparisonCell(comparison.per_range[i], key)
+                : undefined;
+            return statRow(`S${i + 1} · ${side.column}`, r, comparisonHtml);
+        }).join("");
 
-        const cumulativeRow = statRow(`Cumulative · ${side.column}`, side.cumulative);
+        const cumulativeComparisonHtml = hasComparison
+            ? buildComparisonCell(comparison.cumulative, key)
+            : undefined;
+
+        const cumulativeRow = statRow(`Cumulative · ${side.column}`, side.cumulative, cumulativeComparisonHtml);
 
         return `
             <table class="selection-stats-table">
@@ -870,6 +904,7 @@ function renderRangeStatistics(results){
                         <th>Std Dev</th>
                         <th>Min</th>
                         <th>Max</th>
+                        ${hasComparison ? "<th>Comparison</th>" : ""}
                     </tr>
                 </thead>
                 <tbody>
@@ -899,27 +934,7 @@ function renderChannelStats(statistics, comparison){
 
     const rows = statistics.map(s => {
 
-        let comparisonCell = '<span class="cell-note">select both channels</span>';
-
-        if (comparison) {
-
-            if (comparison.overlap_points === 0) {
-                comparisonCell = '<span class="cell-note">no overlapping timestamps</span>';
-            } else {
-                // Each row shows the diff from its own point of view:
-                // A's row = mean(A − B), B's row = mean(B − A).
-                const raw = s.side === "a"
-                    ? comparison.mean_diff
-                    : (comparison.mean_diff === null ? null : -comparison.mean_diff);
-
-                const other = s.side === "a" ? "B" : "A";
-
-                comparisonCell = `
-                    ${formatDiff(raw)}
-                    <span class="cell-note">vs ${other} · avg |Δ| ${comparison.mean_abs_diff.toFixed(4)} · n=${comparison.overlap_points}</span>
-                `;
-            }
-        }
+        const comparisonCell = buildComparisonCell(comparison, s.side);
 
         return `
             <tr>

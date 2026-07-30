@@ -415,7 +415,33 @@ def range_statistics():
             "max": safe_float(numeric.max())
         }
 
+    def comparison_from_slice(sliced):
+        # Same approach as /graph: align by actual Time value (not row
+        # position) so each side collapses to one value per timestamp
+        # before diffing.
+        if not (column_a and column_b and column_a in df.columns and column_b in df.columns):
+            return None
+
+        aligned = pd.DataFrame({
+            "Time": sliced["Time"],
+            "a": pd.to_numeric(sliced[column_a], errors="coerce"),
+            "b": pd.to_numeric(sliced[column_b], errors="coerce")
+        }).groupby("Time").mean(numeric_only=True)
+
+        diff = (aligned["a"] - aligned["b"]).dropna()
+
+        return {
+            "overlap_points": int(len(diff)),
+            "mean_diff": safe_float(diff.mean()) if len(diff) else None,
+            "mean_abs_diff": safe_float(diff.abs().mean()) if len(diff) else None
+        }
+
     results = {}
+
+    # Slice each range once up front (rather than once per side) so it can
+    # be reused both for per-side stats and for the A-vs-B comparison below.
+    range_slices = [filter_dataframe(df, r.get("start"), r.get("end")) for r in ranges]
+    per_range_comparisons = [comparison_from_slice(sliced) for sliced in range_slices]
 
     for side, column in requested:
 
@@ -425,20 +451,15 @@ def range_statistics():
         # counting an overlapping timestamp twice.
         slices = []
 
-        for r in ranges:
-
-            start = r.get("start")
-            end = r.get("end")
-
-            sliced = filter_dataframe(df, start, end)
+        for r, sliced in zip(ranges, range_slices):
 
             slices.append(sliced[["Time", column]])
 
             numeric = pd.to_numeric(sliced[column], errors="coerce")
 
             per_range.append({
-                "start": start,
-                "end": end,
+                "start": r.get("start"),
+                "end": r.get("end"),
                 **stats_from_numeric(numeric)
             })
 
@@ -453,9 +474,21 @@ def range_statistics():
             "cumulative": stats_from_numeric(cumulative_numeric)
         }
 
+    cumulative_comparison = None
+
+    if range_slices:
+        cumulative_slice = pd.concat(range_slices, ignore_index=True).drop_duplicates(subset="Time")
+        cumulative_comparison = comparison_from_slice(cumulative_slice)
+
     return jsonify({
         "success": True,
-        "results": results
+        "results": results,
+        "comparison": {
+            "column_a": column_a,
+            "column_b": column_b,
+            "per_range": per_range_comparisons,
+            "cumulative": cumulative_comparison
+        }
     })
 
 
