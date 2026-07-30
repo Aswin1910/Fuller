@@ -363,6 +363,61 @@ def graph():
     })
 
 
+@app.route("/multi_graph", methods=["POST"])
+def multi_graph():
+
+    if "cache_file" not in session:
+        return jsonify({
+            "success": False,
+            "message": "Please upload files first."
+        })
+
+    try:
+        df = load_dataframe(session["cache_file"])
+    except FileNotFoundError:
+        return jsonify({
+            "success": False,
+            "message": "Cached data not found."
+        })
+
+    payload = request.get_json(silent=True) or {}
+
+    start = payload.get("start")
+    end = payload.get("end")
+    columns = payload.get("columns") or []
+
+    # Order is preserved (not deduped through a set) so trace order/colors
+    # stay stable and match whatever order the plants were picked in.
+    requested = [c for c in columns if c and c in df.columns]
+
+    if not requested:
+        return jsonify({
+            "success": False,
+            "message": "Select at least one plant to plot."
+        })
+
+    filtered = filter_dataframe(df, start, end)
+
+    # Plotting only -- no per-column statistics computed here, unlike
+    # /graph and /range_statistics.
+    series = [
+        {
+            "name": column,
+            "values": [
+                safe_float(v)
+                for v in pd.to_numeric(filtered[column], errors="coerce")
+            ]
+        }
+        for column in requested
+    ]
+
+    return jsonify({
+        "success": True,
+        "time": filtered["Time"].astype(str).tolist(),
+        "series": series
+    })
+
+
 @app.route("/range_statistics", methods=["POST"])
 def range_statistics():
 

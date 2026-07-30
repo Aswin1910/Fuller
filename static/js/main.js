@@ -238,6 +238,7 @@ async function applyFilter(e) {
     showTable(result.table);
     loadStatistics();
     loadGraph();
+    loadMultiGraph();
 }
 
 // -------------------------------
@@ -302,20 +303,36 @@ async function loadStatistics(){
 
 let selectorA = null;
 let selectorB = null;
+let multiPlantSelector = null;
 
 function initializeColumnSelector(columns) {
 
     selectorA = buildSingleSelector("channelASelect", columns, selectorA);
     selectorB = buildSingleSelector("channelBSelect", columns, selectorB);
+    multiPlantSelector = buildMultiSelector("multiPlantSelect", columns, multiPlantSelector);
 
-    selectorA.on("change", () => setTimeout(loadGraph, 100));
-    selectorB.on("change", () => setTimeout(loadGraph, 100));
+    // Each selector is built independently and guarded individually so
+    // that one missing/misconfigured element (e.g. an out-of-sync HTML
+    // template) can't throw partway through and silently skip binding
+    // the ones after it -- that's what previously made Channel A/B
+    // selection stop working the moment the multi-select element wasn't
+    // found on the page.
+    if (selectorA) selectorA.on("change", () => setTimeout(loadGraph, 100));
+    if (selectorB) selectorB.on("change", () => setTimeout(loadGraph, 100));
+    if (multiPlantSelector) multiPlantSelector.on("change", () => setTimeout(loadMultiGraph, 100));
 
 }
 
 function buildSingleSelector(elementId, columns, existingInstance) {
 
     const select = document.getElementById(elementId);
+
+    if (!select) {
+        console.warn(`#${elementId} not found -- skipping this selector. ` +
+            "Is templates/index.html out of date?");
+        return null;
+    }
+
     select.innerHTML = "";
 
     columns.forEach(column => {
@@ -335,6 +352,39 @@ function buildSingleSelector(elementId, columns, existingInstance) {
         placeholder: "Search and select a plant…",
         create: false,
         closeAfterSelect: true
+    });
+
+}
+
+function buildMultiSelector(elementId, columns, existingInstance) {
+
+    const select = document.getElementById(elementId);
+
+    if (!select) {
+        console.warn(`#${elementId} not found -- skipping this selector. ` +
+            "Is templates/index.html out of date?");
+        return null;
+    }
+
+    select.innerHTML = "";
+
+    columns.forEach(column => {
+        const option = document.createElement("option");
+        option.value = column;
+        option.text = column;
+        select.appendChild(option);
+    });
+
+    if (existingInstance) {
+        existingInstance.destroy();
+    }
+
+    return new TomSelect(`#${elementId}`, {
+        // No maxItems cap -- any number of plants can be overlaid.
+        maxOptions: columns.length,
+        placeholder: "Search and select plants to plot…",
+        create: false,
+        closeAfterSelect: false
     });
 
 }
@@ -517,6 +567,100 @@ function plotCombinedTrace(seriesA, seriesB, time){
         graphDiv.removeAllListeners && graphDiv.removeAllListeners("plotly_relayout");
         graphDiv.on("plotly_selected", handleGraphSelection);
         graphDiv.on("plotly_relayout", handleShapeEdit);
+    });
+
+}
+
+// -------------------------------
+// Multi-plant overlay plot (visual only -- no statistics computed)
+// -------------------------------
+
+const MULTI_PLOT_COLORS = [
+    "#F5A623", "#4FD6C4", "#9B7EDE", "#E5484D", "#6E9BF5", "#D6A2E8"
+];
+
+async function loadMultiGraph(){
+
+    const columns = multiPlantSelector ? multiPlantSelector.getValue() : [];
+
+    if (!columns || columns.length === 0) {
+        showMultiGraphPlaceholder("Pick one or more plants above to plot them.");
+        return;
+    }
+
+    const response = await fetch("/multi_graph", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            start: document.getElementById("start").value,
+            end: document.getElementById("end").value,
+            columns
+        })
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+        showMultiGraphPlaceholder(result.message || "Could not load that plot.");
+        return;
+    }
+
+    plotMultiTrace(result.series, result.time);
+
+}
+
+function showMultiGraphPlaceholder(message){
+    const graphDiv = document.getElementById("multiGraph");
+    if (!graphDiv) return;
+    Plotly.purge(graphDiv);
+    graphDiv.innerHTML = `<p class="empty-note">${message}</p>`;
+}
+
+function plotMultiTrace(series, time){
+
+    if (!series || series.length === 0) {
+        showMultiGraphPlaceholder("Pick one or more plants above to plot them.");
+        return;
+    }
+
+    // A previous call may have left the placeholder's plain HTML sitting
+    // in here instead of a Plotly plot -- clear it before newPlot runs.
+    const graphDiv = document.getElementById("multiGraph");
+    if (graphDiv) graphDiv.innerHTML = "";
+
+    const traces = series.map((s, i) => ({
+        x: time,
+        y: s.values,
+        mode: "lines",
+        type: "scatter",
+        name: s.name,
+        line: { color: MULTI_PLOT_COLORS[i % MULTI_PLOT_COLORS.length], width: 1.6 }
+    }));
+
+    const layout = plotlyLayout();
+    layout.showlegend = true;
+    layout.legend = {
+        orientation: "h",
+        x: 0,
+        y: 1.08,
+        font: { color: "#8494A3", size: 11 }
+    };
+    layout.margin = { t: 40, r: 20, b: 45, l: 60 };
+
+    // This plot is view-only: no selections, no editable shapes, just pan
+    // + zoom to look around.
+    layout.dragmode = "pan";
+
+    Plotly.newPlot("multiGraph", traces, layout, {
+        responsive: true,
+        scrollZoom: true,
+        displaylogo: false
+    }).then(() => {
+        // Same measurement-timing issue as the main trace plot: force a
+        // resize once the panel has actually finished expanding.
+        requestAnimationFrame(() => {
+            Plotly.Plots.resize("multiGraph");
+        });
     });
 
 }

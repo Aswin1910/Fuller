@@ -286,6 +286,31 @@ endblock %} {% block content %}
   </div>
 </section>
 
+<!-- Multi-plant overlay plot (visual only -- no calculations) -->
+
+<section id="multiPlotCard" class="panel">
+  <div class="panel__head">
+    <svg class="panel__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 18l4.5-6 3.5 4 4-7 4 5"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+    <h2>Compare plants</h2>
+    <span class="panel__hint">MULTI · PLOT ONLY</span>
+  </div>
+
+  <div class="panel__body">
+    <select id="multiPlantSelect" multiple></select>
+    <div id="multiGraph" class="graph">
+      <p class="empty-note">Pick one or more plants above to plot them.</p>
+    </div>
+  </div>
+</section>
+
 <!-- Full statistics -->
 
 <section id="statsCard" class="panel" hidden>
